@@ -121,7 +121,7 @@ zopen_build() {
   echo "SETUP VERIFICATION"
   echo "PYTHON (type) : $(type python)"
   echo "PYTHON (which) : $(which python)"
-  echo "fetch : $(type -p fetch)"
+  echo "fetch : $(command -v fetch)"
   echo "PATH : ${PATH}"
   echo "DEPOT_TOOLS_UPDATE: ${DEPOT_TOOLS_UPDATE}"
   echo "DEPOT_TOOLS_HOME : ${DEPOT_TOOLS_HOME}"
@@ -160,14 +160,16 @@ zopen_build() {
   echo "JFD FETCH COMPLETE ***********" 
 
   # change dirs to v8
-  cd v8
+  # If fetch failed (network, certificates, python modules), there is no v8
+  # directory; stop here instead of building and installing an empty tree.
+  cd v8 || { printError "fetch v8 failed; see the output above"; return 1; }
   # checkout main
   echo "git checkout main"
   git checkout main
 
   # use the specified commit hash
   echo "git reset c845aba112d05521a9ece51810d2e1a9ca6379da --hard"
-  git reset c845aba112d05521a9ece51810d2e1a9ca6379da --hard
+  git reset c845aba112d05521a9ece51810d2e1a9ca6379da --hard || return 1
 
 
   # Use depot tools gclient sync
@@ -181,6 +183,13 @@ zopen_build() {
   echo "JFD TODO: Do we do the DEPS.sed script here in patches?"
   echo "JFD TODO: Do we do the DEPS.sed script here in patches?"
   gclient sync -D -v
+  # gclient exits non-zero when any hook fails. The wasm_spec_tests hook only
+  # downloads test data, is not needed to build, and fails on Python 3.13
+  # (the six bundled with gsutil lacks six.moves support), so do not stop for it.
+  # Do stop if the dependencies themselves were not fetched.
+  for d in build third_party/zoslib third_party/icu third_party/abseil-cpp; do
+    [ -d "${d}" ] || { printError "gclient sync did not fetch ${d}"; return 1; }
+  done
 
 
   #
@@ -234,6 +243,12 @@ zopen_build() {
   echo "  -- zlib"
   cd ${ZOPEN_ROOT}/v8base/v8/third_party/zlib
   git apply ${ZOPEN_ROOT}/patches/third_party/zlib/git.diff
+  echo "  -- zoslib"
+  cd ${ZOPEN_ROOT}/v8base/v8/third_party/zoslib
+  git apply ${ZOPEN_ROOT}/patches/third_party/zoslib/git.diff || return 1
+  echo "Apply patch for the build repo"
+  cd ${ZOPEN_ROOT}/v8base/v8/build
+  git apply ${ZOPEN_ROOT}/patches/build/git.diff || return 1
   echo "Apply patches for overall repo complete"
   echo "Apply patches for overall repo complete"
   echo "Apply patches for overall repo complete"
@@ -287,7 +302,7 @@ zopen_build() {
   # Do the v8 build
   #
   echo "Generate ninja files using gn..."
-  gn -v gen out/zos_s390x.release --args="is_debug=false treat_warnings_as_errors=false ${COMPONENT_BUILD}"
+  gn -v gen out/zos_s390x.release --args="is_debug=false treat_warnings_as_errors=false ${COMPONENT_BUILD}" || return 1
 
   # This is required when the built binaries (e.g. mksnapshot) and tests are run.
   # Do this now, before tests are started so that when doing a component build
@@ -296,7 +311,9 @@ zopen_build() {
   echo "LIBPATH : ${LIBPATH}"
 
   echo "Perform build using ninja..."
-  V=1 ninja -v -j ${ZOPEN_NUM_JOBS} -C out/zos_s390x.release/
+  # Build only d8 (and the libraries it needs). The default target also builds
+  # V8's test binaries, which take several extra GB and hours and are not installed.
+  V=1 ninja -v -j ${ZOPEN_NUM_JOBS} -C out/zos_s390x.release/ d8 || return 1
 
   # on exit return to the top level of the git repo
   cd ${ZOPEN_ROOT}
@@ -312,17 +329,28 @@ zopen_install() {
   # ZOPEN_INSTALL_DIR: ${HOME}/zopen/usr/local/zopen/v8/v8-DEV
   # Current directory is top level of the repo since zopen_build has run
 
-  mkdir -p ${ZOPEN_INSTALL_DIR}
-  cp -r * ${ZOPEN_INSTALL_DIR} # modify to copy the relevant scripts
-  # This is required for using the post install executables and libs
-  # when doing a component build.  If its not done here it should be
-  # specified as part of the env setup.
-  # TODO: JFD
-  # 1. Make mod to a check to see if build completed befor installing
-  # 2. Add this export to LIBPATH as part of install.
-  # 3. Only modify the LIBPATH if its a component build.
-  echo "Modify ENV as part of the post install setup for component build"
-  echo "export LIBPATH=${ZOPEN_ROOT}/out/zos_s390x.release:$LIBPATH"
+  # Install only the build products. Copying the whole repository would
+  # include v8base (the source tree and dependencies, several GB), which
+  # can fill the file system.
+  out=${ZOPEN_ROOT}/v8base/v8/out/zos_s390x.release
+  if [ ! -x "${out}/d8" ]; then
+    printError "${out}/d8 was not built; nothing to install"
+    return 1
+  fi
+
+  mkdir -p ${ZOPEN_INSTALL_DIR}/bin ${ZOPEN_INSTALL_DIR}/lib ${ZOPEN_INSTALL_DIR}/include
+  cp -p ${out}/d8 ${ZOPEN_INSTALL_DIR}/bin || return 1
+  # d8 looks for the startup snapshot and ICU data next to the executable.
+  for f in snapshot_blob.bin icudtb.dat; do
+    [ -f "${out}/${f}" ] && cp -p ${out}/${f} ${ZOPEN_INSTALL_DIR}/bin
+  done
+  # A component build produces shared libraries that d8 loads from LIBPATH;
+  # zopen adds ${ZOPEN_INSTALL_DIR}/lib to LIBPATH for installed packages.
+  # The .x files are the DLL side decks needed to link against the libraries.
+  for f in ${out}/*.so ${out}/*.x; do
+    [ -f "${f}" ] && cp -p ${f} ${ZOPEN_INSTALL_DIR}/lib
+  done
+  cp -R ${ZOPEN_ROOT}/v8base/v8/include/* ${ZOPEN_INSTALL_DIR}/include
 }
 
 #
