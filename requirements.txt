@@ -1,4 +1,6 @@
-httplib2
+# depot_tools (gerrit_util.py) imports httplib2.socks, which httplib2 removed
+# in 0.30.0. Pin to the last release that still ships it.
+httplib2==0.22.0
 # six is definitely used
 six
 setuptools
