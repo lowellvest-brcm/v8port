@@ -1,0 +1,28 @@
+diff --git a/config/zos/BUILD.gn b/config/zos/BUILD.gn
+index 6d41055b4..90b819536 100644
+--- a/config/zos/BUILD.gn
++++ b/config/zos/BUILD.gn
+@@ -33,7 +33,7 @@ config("compiler") {
+     "-fzos-le-char-mode=ascii",
+     "-m64",
+     "-march=arch14",
+-    "-mzos-target=zosv2r4",
++    "-mzos-target=zosv2r5",
+     "-Wno-unknown-pragmas",
+   ]
+ 
+diff --git a/toolchain/toolchain.gni b/toolchain/toolchain.gni
+index 6794edc81..f6017703a 100644
+--- a/toolchain/toolchain.gni
++++ b/toolchain/toolchain.gni
+@@ -106,6 +106,10 @@ if (host_os == "win") {
+ 
+   stamp_command = "cmd /c type nul > \"{{output}}\""
+   copy_command = "\"$python_path\" $_tool_wrapper_path recursive-mirror {{source}} {{output}}"
++} else if (host_os == "zos") {
++  # z/OS cp has no -a; -p preserves attributes.
++  stamp_command = "touch {{output}}"
++  copy_command = "ln -f {{source}} {{output}} 2>/dev/null || (rm -rf {{output}} && cp -p {{source}} {{output}})"
+ } else {
+   stamp_command = "touch {{output}}"
+   copy_command = "ln -f {{source}} {{output}} 2>/dev/null || (rm -rf {{output}} && cp -af {{source}} {{output}})"

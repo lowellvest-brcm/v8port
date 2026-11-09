@@ -1,0 +1,13 @@
+diff --git a/BUILD.gn b/BUILD.gn
+index 979810c..17ce968 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -13,7 +13,7 @@ config("zoslib_config") {
+   # min arch14 is required for zos-getentropy.cc to use PRNO instruction.
+   cflags = [
+     "-march=arch14",
+-    "-mzos-target=zosv2r4",
++    "-mzos-target=zosv2r5",
+     "-fno-short-enums",
+     "-fzos-le-char-mode=ascii",
+   ]
