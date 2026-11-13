@@ -74,8 +74,13 @@ zopen_build() {
   # enable tracing.
   #set -x
 
+  # zopen's own bin directory holds the real gn. It is not always ${HOME}/zopen:
+  # the zopen root can be installed elsewhere (e.g. a Jenkins WORK_FOLDER), so
+  # derive it from GN_HOME (<root>/usr/local/zopen/gn/gn) and put it first.
+  # Otherwise gn resolves to depot_tools' gn wrapper, which fails (see below).
+  _zopen_bin="${GN_HOME%/usr/local/zopen/*}/usr/local/bin"
   # works
-  export PATH="${HOME}/zopen/usr/local/bin:${DEPOT_TOOLS_HOME}:${GN_HOME}:$PATH"
+  export PATH="${_zopen_bin}:${HOME}/zopen/usr/local/bin:${DEPOT_TOOLS_HOME}:${GN_HOME}:$PATH"
   # will this work?
   # export PATH="${DEPOT_TOOLS_HOME}:${GN_HOME}:$PATH"
   # No.  It fails with:
