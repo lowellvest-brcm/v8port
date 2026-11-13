@@ -27,6 +27,12 @@ export ZOPEN_CATEGORIES="development language core"
 COMPONENT_BUILD="is_component_build=true"
 [ -z "${COMPONENT_BUILD}" ] && COMPONENT_BUILD=""
 
+# Both can be overridden from the environment. The defaults are the gn arguments and
+# the ninja target that were used before these variables existed. For example, to
+# build the monolithic static library (libv8_monolith.a) together with d8:
+#   V8_GN_ARGS="is_debug=false treat_warnings_as_errors=false is_component_build=false v8_monolithic=true v8_static_library=true"
+#   V8_NINJA_TARGETS="d8 v8_monolith"
+
 zopen_check_results()
 {
   dir="$1"
@@ -302,7 +308,8 @@ zopen_build() {
   # Do the v8 build
   #
   echo "Generate ninja files using gn..."
-  gn -v gen out/zos_s390x.release --args="is_debug=false treat_warnings_as_errors=false ${COMPONENT_BUILD}" || return 1
+  echo "gn args: ${V8_GN_ARGS:-is_debug=false treat_warnings_as_errors=false ${COMPONENT_BUILD}}"
+  gn -v gen out/zos_s390x.release --args="${V8_GN_ARGS:-is_debug=false treat_warnings_as_errors=false ${COMPONENT_BUILD}}" || return 1
 
   # This is required when the built binaries (e.g. mksnapshot) and tests are run.
   # Do this now, before tests are started so that when doing a component build
@@ -311,9 +318,11 @@ zopen_build() {
   echo "LIBPATH : ${LIBPATH}"
 
   echo "Perform build using ninja..."
-  # Build only d8 (and the libraries it needs). The default target also builds
-  # V8's test binaries, which take several extra GB and hours and are not installed.
-  V=1 ninja -v -j ${ZOPEN_NUM_JOBS} -C out/zos_s390x.release/ d8 || return 1
+  # Build only the requested targets (default: d8, with the libraries it needs). The
+  # default ninja target also builds V8's test binaries, which take several extra GB
+  # and hours and are not installed.
+  echo "ninja targets: ${V8_NINJA_TARGETS:-d8}"
+  V=1 ninja -v -j ${ZOPEN_NUM_JOBS} -C out/zos_s390x.release/ ${V8_NINJA_TARGETS:-d8} || return 1
 
   # on exit return to the top level of the git repo
   cd ${ZOPEN_ROOT}
@@ -333,13 +342,20 @@ zopen_install() {
   # include v8base (the source tree and dependencies, several GB), which
   # can fill the file system.
   out=${ZOPEN_ROOT}/v8base/v8/out/zos_s390x.release
-  if [ ! -x "${out}/d8" ]; then
-    printError "${out}/d8 was not built; nothing to install"
+  # The monolithic build (v8_monolith target) produces a static library instead of shared ones.
+  mono="${out}/obj/libv8_monolith.a"
+  if [ ! -x "${out}/d8" ] && [ ! -f "${mono}" ]; then
+    printError "neither ${out}/d8 nor ${mono} was built; nothing to install"
     return 1
   fi
 
   mkdir -p ${ZOPEN_INSTALL_DIR}/bin ${ZOPEN_INSTALL_DIR}/lib ${ZOPEN_INSTALL_DIR}/include
-  cp -p ${out}/d8 ${ZOPEN_INSTALL_DIR}/bin || return 1
+  if [ -x "${out}/d8" ]; then
+    cp -p ${out}/d8 ${ZOPEN_INSTALL_DIR}/bin || return 1
+  fi
+  if [ -f "${mono}" ]; then
+    cp -p ${mono} ${ZOPEN_INSTALL_DIR}/lib || return 1
+  fi
   # d8 looks for the startup snapshot and ICU data next to the executable.
   for f in snapshot_blob.bin icudtb.dat; do
     [ -f "${out}/${f}" ] && cp -p ${out}/${f} ${ZOPEN_INSTALL_DIR}/bin
