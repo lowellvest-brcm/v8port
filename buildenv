@@ -57,6 +57,19 @@ zopen_get_version()
 # Hooks/Routines called during `$ zopen build`
 #
 
+# Apply a patch unless it is already applied, so that a retry on an existing
+# tree (CLEAN=false) does not stop at "patch does not apply". A patch counts as
+# already applied when its reverse applies cleanly. Anything else is passed to
+# git apply, which reports the real problem.
+apply_patch_once()
+{
+  if git apply --reverse --check "$1" >/dev/null 2>&1; then
+    echo "     (already applied)"
+    return 0
+  fi
+  git apply "$1"
+}
+
 # Called First
 zopen_init()
 {
@@ -152,11 +165,16 @@ zopen_build() {
   gclient metrics --opt-out
 
   # Now you can start the fetch
-  mkdir v8base
+  mkdir -p v8base
   # change into v8base
   cd v8base
-  # fetch
-  fetch v8
+  # fetch. Skip it when a previous run already created the checkout, so a retry
+  # does not download everything again. The steps below are safe to repeat.
+  if [ -d v8/.git ]; then
+    echo "v8base/v8 already exists; skipping fetch"
+  else
+    fetch v8
+  fi
 
   # At this point, fetch is using depot_tools from third party
   # and has the AWS error.
@@ -217,49 +235,49 @@ zopen_build() {
   echo "** APPLY PATCHES BEGIN ***********" 
   cd ${ZOPEN_ROOT}/v8base/v8
   echo "  -- compbuild"
-  git apply ${ZOPEN_ROOT}/patches/git.v8.compbuild.diff
+  apply_patch_once ${ZOPEN_ROOT}/patches/git.v8.compbuild.diff
   echo "  -- cpp"
-  git apply ${ZOPEN_ROOT}/patches/git.v8.cpp.diff
+  apply_patch_once ${ZOPEN_ROOT}/patches/git.v8.cpp.diff
   echo "  -- debug"
-  git apply ${ZOPEN_ROOT}/patches/git.v8.debug.diff
+  apply_patch_once ${ZOPEN_ROOT}/patches/git.v8.debug.diff
   echo "  -- v8"
-  git apply ${ZOPEN_ROOT}/patches/git.v8.diff
+  apply_patch_once ${ZOPEN_ROOT}/patches/git.v8.diff
   echo "  -- flags"
-  git apply ${ZOPEN_ROOT}/patches/git.v8.flags.diff
+  apply_patch_once ${ZOPEN_ROOT}/patches/git.v8.flags.diff
   echo "  -- killharder"
-  git apply ${ZOPEN_ROOT}/patches/git.v8.killharder.diff
+  apply_patch_once ${ZOPEN_ROOT}/patches/git.v8.killharder.diff
   echo "  -- memset0"
-  git apply ${ZOPEN_ROOT}/patches/git.v8.memset0.diff
+  apply_patch_once ${ZOPEN_ROOT}/patches/git.v8.memset0.diff
   echo "  -- teststatus"
-  git apply ${ZOPEN_ROOT}/patches/git.v8.teststatus.diff
+  apply_patch_once ${ZOPEN_ROOT}/patches/git.v8.teststatus.diff
   echo "  -- tls"
-  git apply ${ZOPEN_ROOT}/patches/git.v8.tls.diff
+  apply_patch_once ${ZOPEN_ROOT}/patches/git.v8.tls.diff
   echo "Apply patch for third_party repos"
   cd ${ZOPEN_ROOT}/v8base/v8/third_party
   echo "  -- abseill-cpp"
   cd ${ZOPEN_ROOT}/v8base/v8/third_party/abseil-cpp
-  git apply ${ZOPEN_ROOT}/patches/third_party/abseil-cpp/git.diff
+  apply_patch_once ${ZOPEN_ROOT}/patches/third_party/abseil-cpp/git.diff
   echo "  -- fuzztest"
   cd ${ZOPEN_ROOT}/v8base/v8/third_party/fuzztest/src
-  git apply ${ZOPEN_ROOT}/patches/third_party/fuzztest/src/git.diff
+  apply_patch_once ${ZOPEN_ROOT}/patches/third_party/fuzztest/src/git.diff
   echo "  -- googletest"
   cd ${ZOPEN_ROOT}/v8base/v8/third_party/googletest/src
-  git apply ${ZOPEN_ROOT}/patches/third_party/googletest/src/git.diff
+  apply_patch_once ${ZOPEN_ROOT}/patches/third_party/googletest/src/git.diff
   echo "  -- protobuf_chrome"
   cd ${ZOPEN_ROOT}/v8base/v8/third_party/protobuf_chrome
-  git apply ${ZOPEN_ROOT}/patches/third_party/protobuf_chrome/git.diff
+  apply_patch_once ${ZOPEN_ROOT}/patches/third_party/protobuf_chrome/git.diff
   echo "  -- re2"
   cd ${ZOPEN_ROOT}/v8base/v8/third_party/re2/src
-  git apply ${ZOPEN_ROOT}/patches/third_party/re2/src/git.diff
+  apply_patch_once ${ZOPEN_ROOT}/patches/third_party/re2/src/git.diff
   echo "  -- zlib"
   cd ${ZOPEN_ROOT}/v8base/v8/third_party/zlib
-  git apply ${ZOPEN_ROOT}/patches/third_party/zlib/git.diff
+  apply_patch_once ${ZOPEN_ROOT}/patches/third_party/zlib/git.diff
   echo "  -- zoslib"
   cd ${ZOPEN_ROOT}/v8base/v8/third_party/zoslib
-  git apply ${ZOPEN_ROOT}/patches/third_party/zoslib/git.diff || return 1
+  apply_patch_once ${ZOPEN_ROOT}/patches/third_party/zoslib/git.diff || return 1
   echo "Apply patch for the build repo"
   cd ${ZOPEN_ROOT}/v8base/v8/build
-  git apply ${ZOPEN_ROOT}/patches/build/git.diff || return 1
+  apply_patch_once ${ZOPEN_ROOT}/patches/build/git.diff || return 1
   echo "Apply patches for overall repo complete"
   echo "Apply patches for overall repo complete"
   echo "Apply patches for overall repo complete"
@@ -301,7 +319,7 @@ zopen_build() {
   echo "make link to gn in v8base/v8/buildtools/zos"
   echo "using GN_HOME: ${GN_HOME}"
   echo "cwd: `pwd`"
-  ln -s "${GN_HOME}/gn" .
+  ln -sf "${GN_HOME}/gn" .
   cd ../..
   export PATH="${PWD}:${ZOPEN_ROOT}/v8base/v8/buildtools/zos:$PATH" # for the 'ar' wrapper
   echo "ZOPEN_ROOT : ${ZOPEN_ROOT}"
